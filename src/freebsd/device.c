@@ -28,23 +28,14 @@
 #include <sys/types.h>
 #include <sys/sysctl.h>
 
+#include <paths.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/pciio.h>
-
-#if defined(HAVE_LIBPROCSTAT_H)
-# include <sys/param.h>
-# include <sys/queue.h>
-# include <sys/socket.h>
-# include <kvm.h>
-# include <libprocstat.h>
-#else
-# include <sys/stat.h>
-# include <dirent.h>
-#endif
 
 #include "libdevq.h"
 
@@ -52,129 +43,15 @@ int
 devq_device_get_devpath_from_fd(int fd,
     char *path, size_t *path_len)
 {
-#if defined(HAVE_LIBPROCSTAT_H)
-	int ret;
-	struct procstat *procstat;
-	struct kinfo_proc *kip;
-	struct filestat_list *head;
-	struct filestat *fst;
-	unsigned int count;
-	size_t len;
-
-	ret = 0;
-	head = NULL;
-
-	procstat = procstat_open_sysctl();
-	if (procstat == NULL)
-		return (-1);
-
-	count = 0;
-	kip = procstat_getprocs(procstat, KERN_PROC_PID, getpid(), &count);
-	if (kip == NULL || count != 1) {
-		ret = -1;
-		goto out;
-	}
-
-	head = procstat_getfiles(procstat, kip, 0);
-	if (head == NULL) {
-		ret = -1;
-		goto out;
-	}
-
-	STAILQ_FOREACH(fst, head, next) {
-		if (fst->fs_uflags != 0 ||
-		    fst->fs_type != PS_FST_TYPE_VNODE ||
-		    fst->fs_fd != fd)
-			continue;
-
-		if (fst->fs_path == NULL) {
-			errno = EBADF;
-			ret = -1;
-			break;
-		}
-
-		len = strlen(fst->fs_path);
-		if (path) {
-			if (*path_len < len) {
-				*path_len = len;
-				errno = ENOMEM;
-				ret = -1;
-				break;
-			}
-
-			memcpy(path, fst->fs_path, len);
-		}
-		*path_len = len;
-		break;
-	}
-
-out:
-	if (head != NULL)
-		procstat_freefiles(procstat, head);
-	if (kip != NULL)
-		procstat_freeprocs(procstat, kip);
-	procstat_close(procstat);
-
-	return (ret);
-#else /* !defined(HAVE_LIBPROCSTAT_H) */
-	int ret, found;
-	DIR *dir;
-	struct stat st;
-	struct dirent *dp;
-	char tmp_path[256];
+	char tmp_path[256] = _PATH_DEV;
 	size_t tmp_path_len;
 
-	/*
-	 * FIXME: This function is specific to DRM devices.
-	 */
-#define DEVQ_DRIDEV_DIR "/dev/dri"
-
-	ret = fstat(fd, &st);
-	if (ret != 0)
-		return (-1);
-	if (!S_ISCHR(st.st_mode)) {
-		errno = EBADF;
-		return (-1);
-	}
-
-	dir = opendir(DEVQ_DRIDEV_DIR);
-	if (dir == NULL)
+	tmp_path_len = strlen(tmp_path);
+	if (fdevname_r(fd, tmp_path + tmp_path_len,
+	    sizeof(tmp_path) - tmp_path_len) == NULL)
 		return (-1);
 
-	found = 0;
-	while ((dp = readdir(dir)) != NULL) {
-		struct stat tmp_st;
-
-		if (dp->d_name[0] == '.')
-			continue;
-
-		tmp_path_len = strlen(DEVQ_DRIDEV_DIR);
-		strcpy(tmp_path, DEVQ_DRIDEV_DIR);
-		tmp_path[tmp_path_len++] = '/';
-		tmp_path[tmp_path_len] = '\0';
-
-		strcpy(tmp_path + tmp_path_len, dp->d_name);
-		tmp_path_len += dp->d_namlen;
-		tmp_path[tmp_path_len] = '\0';
-
-		ret = stat(tmp_path, &tmp_st);
-		if (ret != 0)
-			continue;
-
-		if (st.st_dev  == tmp_st.st_dev &&
-		    st.st_ino  == tmp_st.st_ino) {
-			found = 1;
-			break;
-		}
-	}
-
-	closedir(dir);
-
-	if (!found) {
-		errno = EBADF;
-		return -(1);
-	}
-
+	tmp_path_len = strlen(tmp_path);
 	if (path) {
 		if (*path_len < tmp_path_len) {
 			*path_len = tmp_path_len;
@@ -188,7 +65,6 @@ out:
 		*path_len = tmp_path_len;
 
 	return (0);
-#endif /* defined(HAVE_LIBPROCSTAT_H) */
 }
 
 static int

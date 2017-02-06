@@ -18,14 +18,6 @@ esac
 
 AC_SUBST([opsys])
 
-AC_CHECK_HEADERS([libprocstat.h], [
-	AC_SEARCH_LIBS([procstat_open_sysctl], [procstat])
-	], [], [
-	#include <sys/param.h>
-	#include <sys/queue.h>
-	#include <sys/socket.h>
-	])
-
 # ----------------------------------------------------------------------------
 # Check if we want to build extra diagnostic programs
 
